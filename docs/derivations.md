@@ -49,16 +49,23 @@ With right endpoints the sum is $\frac{1}{2} W_t^2 + \frac{1}{2} \sum (\Delta W_
 
 ## 3. Martingale properties
 
-- $\mathbb{E}[W_t \mid \mathcal{F}_s] = W_s$ since increments are independent with mean 0.
-- $W_t^2 - t$: write $W_t = W_s + (W_t - W_s)$. Then
+**Brownian motion.** $`\mathbb{E}[W_t \mid \mathcal{F}_s] = W_s`$ since increments are independent with mean 0.
 
-  ```math
-  \mathbb{E}[W_t^2 \mid \mathcal{F}_s] = W_s^2 + 2W_s\cdot 0 + (t-s),
-  ```
+**Process $`W_t^2 - t`$.** Write $`W_t = W_s + (W_t - W_s)`$. Then
 
-  so $\mathbb{E}[W_t^2 - t \mid \mathcal{F}_s] = W_s^2 - s$.
+```math
+\mathbb{E}[W_t^2 \mid \mathcal{F}_s] = W_s^2 + 2W_s\cdot 0 + (t-s),
+```
 
-- Itô integral $I_t = \int_0^t H\,dW$ with $H$ adapted: each term $H_{t_k}(\Delta W_k)$ has $\mathbb{E}[\cdot \mid \mathcal{F}_{t_k}] = H_{t_k}\cdot \mathbb{E}[\Delta W_k] = 0$, so $I_t$ is a martingale and $\mathbb{E}[I_t] = 0$. This is exactly where "left endpoint" (adaptedness) is used.
+so $`\mathbb{E}[W_t^2 - t \mid \mathcal{F}_s] = W_s^2 - s`$.
+
+**Itô integral.** Let $`I_t = \int_0^t H\,dW`$ with $`H`$ adapted. Each term $`H_{t_k}(\Delta W_k)`$ satisfies
+
+```math
+\mathbb{E}[\cdot \mid \mathcal{F}_{t_k}] = H_{t_k}\cdot \mathbb{E}[\Delta W_k] = 0,
+```
+
+so $`I_t`$ is a martingale and $`\mathbb{E}[I_t] = 0`$. This is exactly where "left endpoint" (adaptedness) is used.
 
 ## 4. Black-Scholes PDE by delta hedging
 
