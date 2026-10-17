@@ -1,21 +1,21 @@
 # Where Does Delta-Hedging Error Come From?
-### Itô calculus, martingales and Black–Scholes, tested against stochastic volatility
+### Itô calculus, martingales and Black-Scholes, tested against stochastic volatility
 
 ## Research question
 
-> A trader sells an option and hedges it with the Black–Scholes delta. The hedge leaves a residual profit-and-loss (P&L).
+> A trader sells an option and hedges it with the Black-Scholes delta. The hedge leaves a residual profit-and-loss (P&L).
 > **How much of that residual comes from (i) hedging only at discrete times, and how much from (ii) the model being wrong? Can each part be predicted in advance?**
 
-Method: derive the prediction on paper ([`docs/derivations.md`](docs/derivations.md)), then test it by simulation, in a world where Black–Scholes holds exactly (error = pure discretisation) and in a Heston stochastic-volatility world (error = discretisation + misspecification). Everything is covered by an automated test suite (35 tests).
+Method: derive the prediction on paper ([`docs/derivations.md`](docs/derivations.md)), then test it by simulation, in a world where Black-Scholes holds exactly (error = pure discretisation) and in a Heston stochastic-volatility world (error = discretisation + misspecification). Everything is covered by an automated test suite (35 tests).
 
 ## Key findings
 
-1. **In a true Black–Scholes world the hedge error is exactly the second-order Itô term and is predictable.** Each step leaves `−½ΓS²σ²Δt(Z²−1)`. Summing its variance gives a closed-form prediction for the std of the P&L, which matches simulation to within **7%** at N=8 and **3%** for every N ≥ 32. The summed Γ-terms correlate with the actual P&L at **0.957 (N=8) rising to 0.996 (N=1024)**. The std falls like N^−0.491 (theory −0.5).
+1. **In a true Black-Scholes world the hedge error is exactly the second-order Itô term and is predictable.** Each step leaves $`-\frac{1}{2}\Gamma S^2 \sigma^2 \Delta t\,(Z^2 - 1)`$. Summing its variance gives a closed-form prediction for the std of the P&L, which matches simulation to within **7%** at N=8 and **3%** for every N ≥ 32. The summed $\Gamma$-terms correlate with the actual P&L at **0.957 (N=8) rising to 0.996 (N=1024)**. The std falls like $N^{-0.491}$ (theory $-0.5$).
 2. **Under Heston, hedging more often does not help.** From N=16 to N=1000 rebalances the std only falls from 2.85 to 2.23, while in the BS world it falls from 1.65 to 0.22 (a **10×** gap at N=1000). The distribution is also left-skewed (skew ≈ −1.0) with fat tails (1% quantile −7.2 vs −0.56). The floor is model risk, not discretisation.
-3. **The *mean* P&L under misspecification is fixed by the premium and is predictable to within sampling error.** If you sell at `V_BS(σ_h)` and the true model is Heston, `E[P&L] = V_BS(σ_h) − C_Heston`. Across 9 settings (3 correlations × 3 hedge vols) the largest deviation from the prediction is **1.2 standard errors**.
+3. **The *mean* P&L under misspecification is fixed by the premium and is predictable to within sampling error.** If you sell at $`V_{\mathrm{BS}}(\sigma_h)`$ and the true model is Heston, $`\mathbb{E}[\text{P\&L}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}`$. Across 9 settings (3 correlations × 3 hedge vols) the largest deviation from the prediction is **1.2 standard errors**.
 4. **A correct average does not mean a safe hedge:** the premium decides the mean, but the spread and the left tail stay large whatever hedge vol is chosen.
 
-**Base parameters:** `S0=K=100, T=1, r=3%`; BS-world σ = 20%; Heston `v0=θ=0.04, κ=2, ξ=0.5, ρ=−0.7` (so long-run vol = 20% = the BS σ). Seeds are fixed.
+**Base parameters:** `S0=K=100, T=1, r=3%`; BS-world $\sigma = 20\%$; Heston `v0=θ=0.04, κ=2, ξ=0.5, ρ=−0.7` (so long-run vol = 20% = the BS $\sigma$). Seeds are fixed.
 
 ## Reproduce
 
@@ -34,11 +34,15 @@ Layout: `src/itobs/` (`bs`, `ito`, `martingale`, `pricing`, `hedging`, `heston`,
 
 ## A. Research: sources of hedging error
 
-### A1. Discretisation error in a Black–Scholes world: predicted from Itô's lemma
+### A1. Discretisation error in a Black-Scholes world: predicted from Itô's lemma
 
-**Prediction (derived in `docs/derivations.md` §10).** Between rebalances the delta hedge cancels first-order moves, leaving the second-order term `e_k = −½ Γ_k S_k² σ² Δt (Z_k² − 1)`. These are martingale differences with `Var(Z²−1)=2`, so
+**Prediction (derived in `docs/derivations.md` §10).** Between rebalances the delta hedge cancels first-order moves, leaving the second-order term $`e_k = -\frac{1}{2}\Gamma_k S_k^2 \sigma^2 \Delta t\,(Z_k^2 - 1)`$. These are martingale differences with $`\mathrm{Var}(Z^2-1)=2`$, so
 
-`Var(P&L) ≈ (σ⁴ Δt / 2) ∫₀ᵀ e^{−2rt} E[Γ_t² S_t⁴] dt`,  hence std ∝ 1/√N.
+```math
+\mathrm{Var}(\text{P\&L}) \approx \frac{\sigma^4 \Delta t}{2}\int_0^T e^{-2rt}\,\mathbb{E}[\Gamma_t^2 S_t^4]\,dt,
+```
+
+hence std $\propto 1/\sqrt{N}$.
 
 The integral is evaluated numerically by `theory.predicted_hedge_std` (no fitting).
 
@@ -52,11 +56,11 @@ Fitted log–log slope: **−0.491** (theory −0.5). Mean P&L is within 1 stand
 
 ![Error sources](figures/fig8_error_sources.png)
 
-**Interpretation.** (a) The prediction tracks simulation across two orders of magnitude of N. (c) The actual P&L, path by path, is almost the sum of the Γ-terms, so the residual risk of a delta hedge in the ideal world *is* the second-order Itô term and nothing else. The prediction is slightly high at small N (about 7% at N=8), where the continuous-time approximation is cruder; we did not analyse this further.
+**Interpretation.** (a) The prediction tracks simulation across two orders of magnitude of N. (c) The actual P&L, path by path, is almost the sum of the $\Gamma$-terms, so the residual risk of a delta hedge in the ideal world *is* the second-order Itô term and nothing else. The prediction is slightly high at small N (about 7% at N=8), where the continuous-time approximation is cruder; we did not analyse this further.
 
 ### A2. Misspecification: the error floor
 
-Same hedge (BS delta, σ_h = 20%, sold at the BS price), but the true paths follow Heston. 15,000 paths per N.
+Same hedge (BS delta, $\sigma_h = 20\%$, sold at the BS price), but the true paths follow Heston. 15,000 paths per N.
 
 | N | 16 | 64 | 256 | 1000 |
 |---|---|---|---|---|
@@ -68,11 +72,17 @@ Same hedge (BS delta, σ_h = 20%, sold at the BS price), but the true paths foll
 
 (Panel (b) of the figure above plots the stds; panel (a) of the figure in A3 shows the centred Heston P&L distributions.)
 
-**Interpretation.** The BS-world error keeps shrinking like 1/√N; the Heston-world error flattens at ≈2.2. The extra randomness is volatility moving, which the stock-only delta hedge cannot offset (one tradable asset, two random drivers: the market is incomplete). We did not decompose the floor into a Vega term; that would be the natural next test.
+**Interpretation.** The BS-world error keeps shrinking like $1/\sqrt{N}$; the Heston-world error flattens at ≈2.2. The extra randomness is volatility moving, which the stock-only delta hedge cannot offset (one tradable asset, two random drivers: the market is incomplete). We did not decompose the floor into a Vega term; that would be the natural next test.
 
 ### A3. The mean P&L is the premium minus fair value (and it is exactly predictable)
 
-If you sell for `V_BS(σ_h)` and hedge with a self-financing strategy, the discounted hedge gains have mean 0 under the pricing measure Q. Therefore `E[P&L] = V_BS(σ_h) − C_Heston`. Test: N=252, 15,000 paths per ρ, paths drift at r.
+If you sell for $`V_{\mathrm{BS}}(\sigma_h)`$ and hedge with a self-financing strategy, the discounted hedge gains have mean 0 under the pricing measure $\mathbb{Q}$. Therefore
+
+```math
+\mathbb{E}[\text{P\&L}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}.
+```
+
+Test: N=252, 15,000 paths per $\rho$, paths drift at $r$.
 
 | ρ | σ_h | Predicted | Simulated | z-score |
 |---|---|---|---|---|
@@ -90,96 +100,129 @@ If you sell for `V_BS(σ_h)` and hedge with a self-financing strategy, the disco
 
 The theory behind Section A. Derivations are in [`docs/derivations.md`](docs/derivations.md).
 
-### B1. Itô's lemma: where does −σ²/2 come from?
+### B1. Itô's lemma: where does $-\sigma^2/2$ come from?
 
-**Claim.** Applying Itô's lemma to ln S gives `d ln S = (μ − σ²/2)dt + σ dW`; the extra `−σ²/2` comes from the second-order term `½ f''(S)(dS)²` because `(dW)² = dt`.
+**Claim.** Applying Itô's lemma to $\ln S$ gives
+
+```math
+d\ln S = (\mu - \tfrac{1}{2}\sigma^2)\,dt + \sigma\,dW;
+```
+
+the extra $`-\sigma^2/2`$ comes from the second-order term $`\frac{1}{2} f''(S)(dS)^2`$ because $(dW)^2 = dt$.
 
 ![Itô lemma](figures/fig1_ito_lemma.png)
 
 | Quantity | Simulated | Theory |
 |---|---|---|
-| E[ln(S_T/S₀)] | 0.0886 | 0.0888 (Itô) vs 0.1200 (naive μT) |
-| E[ln] via **Euler** SDE scheme (no Itô used) | 0.0895 | 0.0888 |
-| E[S_T] | 112.74 | 112.75 = S₀e^{μT} |
-| Median S_T | 109.24 | S₀e^{(μ−σ²/2)T} ≈ 109.2 |
-| E[∫W dW], left endpoint | +0.003 | 0 |
-| E[∫W dW], right endpoint | +1.003 | +T = 1 |
+| $`\mathbb{E}[\ln(S_T/S_0)]`$ | 0.0886 | 0.0888 (Itô) vs 0.1200 (naive $\mu T$) |
+| $`\mathbb{E}[\ln S]`$ via **Euler** SDE scheme (no Itô used) | 0.0895 | 0.0888 |
+| $`\mathbb{E}[S_T]`$ | 112.74 | 112.75 = $S_0 e^{\mu T}$ |
+| Median $S_T$ | 109.24 | $S_0 e^{(\mu-\sigma^2/2)T} \approx 109.2$ |
+| $`\mathbb{E}[\int_0^T W\,dW]`$, left endpoint | +0.003 | 0 |
+| $`\mathbb{E}[\int_0^T W\,dW]`$, right endpoint | +1.003 | $+T = 1$ |
 
 **Interpretation.**
-- (a) The log-return is centred at `μ − σ²/2`, not `μ`. An independent Euler discretisation of the raw SDE reproduces this, so the shift is a real feature of the dynamics, not an algebra trick.
-- (b) The *mean* of S_T grows at μ but the *median* grows more slowly. A typical investor experiences the median: this is the **volatility drag** (+50% then −50% leaves you at 75).
-- (c) Evaluating the integrand at the *right* endpoint (i.e. peeking one step ahead) adds exactly `T` to the integral. That `+T` is `(dW)² = dt` accumulated over the interval. The left-endpoint (Itô) integral has mean 0, which is what a legitimate trading strategy must satisfy.
+
+**(a)** The log-return is centred at $`\mu - \sigma^2/2`$, not $\mu$. An independent Euler discretisation of the raw SDE reproduces this, so the shift is a real feature of the dynamics, not an algebra trick.
+
+**(b)** The *mean* of $S_T$ grows at $\mu$ but the *median* grows more slowly. A typical investor experiences the median: this is the **volatility drag** (+50% then −50% leaves you at 75).
+
+**(c)** Evaluating the integrand at the *right* endpoint (i.e. peeking one step ahead) adds exactly $T$ to the integral. That $+T$ is $(dW)^2 = dt$ accumulated over the interval. The left-endpoint (Itô) integral has mean 0, which is what a legitimate trading strategy must satisfy.
 
 ---
 
 ### B2. Martingales: what is a "fair game"?
 
-**Claim.** `W_t` and `W_t² − t` are martingales; `W_t²` is not. Discounted prices `e^{−rt}S_t` are martingales **only** under the risk-neutral measure Q, where the drift is r instead of μ.
+**Claim.** $`W_t`$ and $`W_t^2 - t`$ are martingales; $`W_t^2`$ is not. Discounted prices $e^{-rt}S_t$ are martingales **only** under the risk-neutral measure $\mathbb{Q}$, where the drift is $r$ instead of $\mu$.
 
 ![Martingale](figures/fig2_martingale.png)
 
 | Quantity | Result |
 |---|---|
-| E[W_T²] | 0.995 (≈ T, grows linearly) |
-| E[W_T² − T] | −0.005 (max over time grid: 0.008) |
-| E_P[e^{−rT}S_T] (drift μ) | 109.48 ≠ S₀ |
-| E_Q[e^{−rT}S_T] (drift r) | 100.03 ≈ S₀ |
+| $`\mathbb{E}[W_T^2]`$ | 0.995 (≈ $T$, grows linearly) |
+| $`\mathbb{E}[W_T^2 - T]`$ | −0.005 (max over time grid: 0.008) |
+| $`\mathbb{E}^{\mathbb{P}}[e^{-rT}S_T]`$ (drift $\mu$) | 109.48 ≠ $S_0$ |
+| $`\mathbb{E}^{\mathbb{Q}}[e^{-rT}S_T]`$ (drift $r$) | 100.03 ≈ $S_0$ |
 
 **Interpretation.**
-- (a) `W_t²` drifts upward with slope 1; subtracting `t` removes the trend, which is the same `−t/2` correction that appears in `∫W dW = ½W_t² − t/2`. The Itô integral is a martingale *because* the correction exists.
-- (b) Under the real-world measure P the discounted stock has a trend (it earns a risk premium μ − r > 0). Under Q the trend is gone. Changing the measure changes the drift but not the volatility (Girsanov), which is why σ is the only free input to option pricing.
+
+**(a)** $`W_t^2`$ drifts upward with slope 1; subtracting $t$ removes the trend, which is the same $`-t/2`$ correction that appears in
+
+```math
+\int_0^t W\,dW = \tfrac{1}{2}W_t^2 - \tfrac{1}{2}t.
+```
+
+The Itô integral is a martingale *because* the correction exists.
+
+**(b)** Under the real-world measure $\mathbb{P}$ the discounted stock has a trend (it earns a risk premium $\mu - r > 0$). Under $\mathbb{Q}$ the trend is gone. Changing the measure changes the drift but not the volatility (Girsanov), which is why $\sigma$ is the only free input to option pricing.
 
 ---
 
-### B3. Black–Scholes priced four ways
+### B3. Black-Scholes priced four ways
 
-**Claim.** The Black–Scholes PDE (from delta-hedging), the risk-neutral expectation `e^{−rT}E^Q[(S_T−K)⁺]`, and a binomial tree are the same object seen three ways, and all agree with the closed form. Using the real-world measure instead gives a wrong answer.
+**Claim.** The Black-Scholes PDE (from delta-hedging), the risk-neutral expectation $`e^{-rT}\mathbb{E}^{\mathbb{Q}}[(S_T-K)^+]`$, and a binomial tree are the same object seen three ways, and all agree with the closed form. Using the real-world measure instead gives a wrong answer.
 
 ![Pricing](figures/fig3_pricing.png)
 
 | Method | Price |
 |---|---|
 | Closed form | 11.3485 |
-| Monte Carlo under Q (2M paths) | 11.3386 ± 0.0248 (95% CI) |
+| Monte Carlo under $\mathbb{Q}$ (2M paths) | 11.3386 ± 0.0248 (95% CI) |
 | PDE, Crank–Nicolson (400×400) | 11.3465 |
 | Binomial tree (N = 1000) | 11.3460 |
-| **Monte Carlo under P (wrong)** | **17.6105** |
+| **Monte Carlo under $\mathbb{P}$ (wrong)** | **17.6105** |
 
 **Interpretation.**
-- All four correct methods agree to ~2 cents; none of them contains μ.
-- Simulating with the *real* drift and discounting at r overprices the call by ~55%: the expected payoff is higher under P, but that is not what the hedger pays. Price = cost of replication, not expected payoff.
-- Convergence rates match theory: Monte Carlo error ∝ 1/√n, binomial error ∝ 1/N. The tree's up-probability `q = (e^{rΔt} − d)/(u − d)` is literally the "risk-neutral probability": the weight that makes the discounted stock a martingale.
+
+All four correct methods agree to ~2 cents; none of them contains $\mu$.
+
+Simulating with the *real* drift and discounting at $r$ overprices the call by ~55%: the expected payoff is higher under $\mathbb{P}$, but that is not what the hedger pays. Price = cost of replication, not expected payoff.
+
+Convergence rates match theory: Monte Carlo error $\propto 1/\sqrt{n}$, binomial error $\propto 1/N$. The tree's up-probability
+
+```math
+q = \frac{e^{r\Delta t} - d}{u - d}
+```
+
+is literally the "risk-neutral probability": the weight that makes the discounted stock a martingale.
 
 ---
 
-### B4. Greeks and the Black–Scholes PDE
+### B4. Greeks and the Black-Scholes PDE
 
 ![Greeks](figures/fig5_greeks.png)
 
-- The closed-form price satisfies `Θ + ½σ²S²Γ + rSΔ − rV = 0` to machine precision (max residual 1.6×10⁻¹⁵), so formula and PDE are mutually consistent.
-- (b) For near-delta-neutral positions `Θ ≈ −½σ²S²Γ`: the long-gamma holder pays time decay each day in exchange for convexity gains when the stock moves. This is the "buy gamma, pay theta" trade-off that option traders manage daily.
+The closed-form price satisfies
 
----
+```math
+\Theta + \tfrac{1}{2}\sigma^2 S^2 \Gamma + rS\Delta - rV = 0
+```
 
----
+to machine precision (max residual $1.6 \times 10^{-15}$), so formula and PDE are mutually consistent.
+
+For near-delta-neutral positions $`\Theta \approx -\frac{1}{2}\sigma^2 S^2 \Gamma`$: the long-gamma holder pays time decay each day in exchange for convexity gains when the stock moves. This is the "buy gamma, pay theta" trade-off that option traders manage daily.
 
 ---
 
 ## C. Extension: implied volatility and the smile
 
-### C1. Implied volatility: where Black–Scholes breaks (SPY)
+### C1. Implied volatility: where Black-Scholes breaks (SPY)
 
-**Question.** BS says one number σ prices every option. What does the **market** look like when we invert BS strike by strike from real quotes?
+**Question.** BS says one number $\sigma$ prices every option. What does the **market** look like when we invert BS strike by strike from real quotes?
 
-**Method.** `datapull.py` loads SPY option chains from Yahoo Finance: mid (or last) prices, put–call parity to infer the forward **F** per expiry (dividends absorbed in **F**), OTM calls for **K ≥ F** and OTM puts for **K < F**, then writes `data/quotes_SPY_REAL.csv`. `run_extension.py` inverts Black–Scholes per strike with `implied_vol.smile_from_quotes`, using **S_eff = F e^{−rT}** each expiry (equivalent to spot plus continuous yield in BS). Summary numbers are in `results_extension.json` under `real_smile`. Update **r** in both `datapull.py` and `run_extension.py` (`REAL_R`) when refreshing data.
+**Method.** `datapull.py` loads SPY option chains from Yahoo Finance: mid (or last) prices, put–call parity to infer the forward **F** per expiry (dividends absorbed in **F**), OTM calls for **K ≥ F** and OTM puts for **K < F**, then writes `data/quotes_SPY_REAL.csv`. `run_extension.py` inverts Black-Scholes per strike with `implied_vol.smile_from_quotes`, using $S_{\mathrm{eff}} = F e^{-rT}$ each expiry (equivalent to spot plus continuous yield in BS). Summary numbers are in `results_extension.json` under `real_smile`. Update **r** in both `datapull.py` and `run_extension.py` (`REAL_R`) when refreshing data.
 
 ![Smile](figures/fig6_smile.png)
 
 **Interpretation** (example from the bundled quote file; re-run `datapull.py` to refresh).
-- (a) Implied vol is **not flat**: e.g. for expiry 2026-12-18, IV is about **25.6%** at **K=665** vs **12.7%** at **K=890**, with ATM near **13.8%** — the usual equity-index **downward skew** (puts richer than calls at the same distance from the forward).
-- (b) Panel (b) plots IV vs **ln(K/F)** so skew is comparable across expiries without guessing a dividend yield on spot.
-- (c) Short-dated slices are often **steeper** than longer ones in the sample file; see multiple expiries in the figure and `real_smile.skew_sample` in JSON.
-- Which BS assumption fails in practice? **Constant σ.** Implied vol is best read as a **quoting convention**, not a single forecast of future volatility.
+
+**(a)** Implied vol is **not flat**: e.g. for expiry 2026-12-18, IV is about **25.6%** at **K=665** vs **12.7%** at **K=890**, with ATM near **13.8%** — the usual equity-index **downward skew** (puts richer than calls at the same distance from the forward).
+
+**(b)** Panel (b) plots IV vs **ln(K/F)** so skew is comparable across expiries without guessing a dividend yield on spot.
+
+**(c)** Short-dated slices are often **steeper** than longer ones in the sample file; see multiple expiries in the figure and `real_smile.skew_sample` in JSON.
+
+Which BS assumption fails in practice? **Constant $\sigma$.** Implied vol is best read as a **quoting convention**, not a single forecast of future volatility.
 
 ---
 
@@ -193,7 +236,7 @@ The theory behind Section A. Derivations are in [`docs/derivations.md`](docs/der
 
 | Check | Result |
 |---|---|
-| Heston with ξ→0 vs BS(σ=20%) | 9.4134 vs 9.4134 |
+| Heston with $\xi \to 0$ vs BS($\sigma=20\%$) | 9.4134 vs 9.4134 |
 | Heston semi-analytic vs Monte Carlo (600k paths, full-truncation Euler) | 8.929 vs 8.897 ± 0.026 |
 
 The Monte Carlo is slightly below the semi-analytic value (about 0.4%); we attribute this to Euler discretisation but did not isolate it.
@@ -211,11 +254,12 @@ The Monte Carlo is slightly below the semi-analytic value (about 0.4%); we attri
 (Histograms are clipped to ±5 for display; table statistics use all paths.)
 
 **Interpretation.**
-- Selling at the Heston price makes the **average** P&L ≈ 0, yet the **spread is about 5.7× larger** than in the BS world (2.29 vs 0.40) at 252 rebalances. This repeats Section A's finding with different parameters (ATM implied vol as hedge vol, own random seed).
-- For the OTM call (K=120), hedging with that strike's own implied vol cuts the P&L std from 2.11 to 1.84 but makes the distribution more left-skewed (−0.06 → −1.49) and the 5% tail slightly worse (−2.75 → −2.91). So "use the strike's own IV" is better on one measure and worse on another; there is no free lunch in choosing the hedge vol.
-- Practical reading: this is why desks hedge Vega with other options, why implied-vol surfaces and stochastic-vol/local-vol models exist, and why a BS delta is a useful but imperfect hedge.
 
----
+Selling at the Heston price makes the **average** P&L ≈ 0, yet the **spread is about 5.7× larger** than in the BS world (2.29 vs 0.40) at 252 rebalances. This repeats Section A's finding with different parameters (ATM implied vol as hedge vol, own random seed).
+
+For the OTM call (K=120), hedging with that strike's own implied vol cuts the P&L std from 2.11 to 1.84 but makes the distribution more left-skewed (−0.06 → −1.49) and the 5% tail slightly worse (−2.75 → −2.91). So "use the strike's own IV" is better on one measure and worse on another; there is no free lunch in choosing the hedge vol.
+
+Practical reading: this is why desks hedge Vega with other options, why implied-vol surfaces and stochastic-vol/local-vol models exist, and why a BS delta is a useful but imperfect hedge.
 
 ---
 
@@ -225,11 +269,11 @@ The Monte Carlo is slightly below the semi-analytic value (about 0.4%); we attri
 
 | Area | What is checked |
 |---|---|
-| Black–Scholes | put–call parity, no-arbitrage bounds, Δ/Γ/Θ vs finite differences, closed form satisfies the PDE (residual < 1e−10) |
-| Itô / martingales | E[ln S] shift of −σ²/2 (naive μT rejected), E[S_T]=S₀e^{μT}, Euler scheme vs Itô solution, left vs right endpoint integral, W²−t martingale, discounted price martingale only under Q |
-| Pricing | MC under Q inside its confidence interval, MC under P rejected, PDE vs closed form, binomial order-1 convergence |
-| Heston / implied vol | ξ→0 reduces to BS, semi-analytic vs Monte Carlo, strike monotonicity, implied-vol round trip, arbitrage-violating prices rejected, negative ρ gives downward skew |
-| Hedging | std slope in [−0.58, −0.42], std within 6% of the theoretical prediction, Γ-term correlation > 0.97, mean ≈ 0 for several μ, misspecified mean = premium − fair value, misspecification floor |
+| Black-Scholes | put–call parity, no-arbitrage bounds, $\Delta/\Gamma/\Theta$ vs finite differences, closed form satisfies the PDE (residual $`< 10^{-10}`$) |
+| Itô / martingales | $`\mathbb{E}[\ln S]`$ shift of $-\sigma^2/2$ (naive $\mu T$ rejected), $`\mathbb{E}[S_T]=S_0 e^{\mu T}`$, Euler scheme vs Itô solution, left vs right endpoint integral, $W^2-t$ martingale, discounted price martingale only under $\mathbb{Q}$ |
+| Pricing | MC under $\mathbb{Q}$ inside its confidence interval, MC under $\mathbb{P}$ rejected, PDE vs closed form, binomial order-1 convergence |
+| Heston / implied vol | $\xi \to 0$ reduces to BS, semi-analytic vs Monte Carlo, strike monotonicity, implied-vol round trip, arbitrage-violating prices rejected, negative $\rho$ gives downward skew |
+| Hedging | std slope in $[-0.58, -0.42]$, std within 6% of the theoretical prediction, $\Gamma$-term correlation $> 0.97$, mean $\approx 0$ for several $\mu$, misspecified mean = premium − fair value, misspecification floor |
 
 Randomised tests use fixed seeds and tolerances of several standard errors.
 
@@ -237,10 +281,10 @@ Randomised tests use fixed seeds and tolerances of several standard errors.
 
 - **SPY quotes are a snapshot, not calibrated.** `datapull.py` uses Yahoo mids/lasts and a flat **r**; fig6 is descriptive. Calibrating Heston (or another model) to `quotes_SPY_REAL.csv` is a natural next step.
 - **The Heston error floor is not decomposed.** A test of "residual ≈ Vega × volatility shocks" would turn finding 2 from an observation into an explanation. Adding a second option to hedge Vega would show how much of the floor disappears.
-- **A1's prediction is first-order in Δt.** It is least accurate at very small N (about 7% at N=8).
+- **A1's prediction is first-order in $\Delta t$.** It is least accurate at very small N (about 7% at N=8).
 - **Heston paths use full-truncation Euler.** In the earlier pricer check, Monte Carlo sat about 0.4% below the semi-analytic price (8.897 vs 8.929), slightly outside its sampling interval; we attribute this to discretisation but did not isolate it. We did not implement the QE scheme.
 - **Not covered:** transaction costs, jumps, local volatility, variance reduction.
-- In `run_all.py` (figure `fig4_hedging.png`) the true drift is varied (μ ∈ {−0.2, 0, 0.12, 0.4}); mean P&L stays near 0, but at large |μ−r| a small statistically detectable bias (≈ −0.035 at μ=0.4, N=252) remains, consistent with an O(Δt) discretisation effect that we did not verify.
+- In `run_all.py` (figure `fig4_hedging.png`) the true drift is varied ($\mu \in \{-0.2, 0, 0.12, 0.4\}$); mean P&L stays near 0, but at large $|\mu-r|$ a small statistically detectable bias (≈ −0.035 at $\mu=0.4$, N=252) remains, consistent with an $O(\Delta t)$ discretisation effect that we did not verify.
 
 ## References
 - Shreve, *Stochastic Calculus for Finance II* (Itô calculus, risk-neutral pricing)
