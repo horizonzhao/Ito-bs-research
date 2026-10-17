@@ -1,4 +1,4 @@
-"""Extension: SPY implied-vol smile (fig6) and Heston hedging supplement (fig7)."""
+"""Extension: ^SPX implied-vol smile (fig6) and Heston hedging supplement (fig7)."""
 import json, sys, pathlib
 from datetime import datetime, timezone
 
@@ -19,7 +19,7 @@ rng = np.random.default_rng(7)
 plt.rcParams.update({"figure.dpi": 130, "axes.grid": True, "grid.alpha": .25, "font.size": 10})
 
 # 真实微笑（与 datapull.py 保持一致）
-REAL_TICKER = "SPY"
+REAL_TICKER = "^SPX"
 REAL_R = 0.045
 
 S0, r = 100.0, 0.03
@@ -108,7 +108,7 @@ R["validation"] = dict(
     mc_ci95=float(1.96 * mc_pay.std() / np.sqrt(len(mc_pay))),
 )
 
-# --- 1. Real SPY smile -> fig6 ---
+# --- 1. Real ^SPX smile -> fig6 ---
 quotes_csv = DATA / f"quotes_{REAL_TICKER.replace('^', '')}_REAL.csv"
 if not quotes_csv.is_file():
     raise FileNotFoundError(

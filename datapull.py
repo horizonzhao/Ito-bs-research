@@ -1,13 +1,15 @@
-"""从 Yahoo Finance 拉取真实期权报价，写入 data/quotes_<标的>_REAL.csv。
+"""Pull real option quotes from Yahoo Finance into data/quotes_<symbol>_REAL.csv.
 
-流程：
-1. 用 yfinance 拉取标的现价和各到期日的期权链（看涨 + 看跌）
-2. 优先 bid/ask 中间价；盘外 bid/ask 常为 0 时用 lastPrice（美股高流动性标的仍可用）
-3. 每个到期日用看涨-看跌平价反推远期价格 F（自动吸收股息/分红的影响）
-4. 只保留虚值合约：K >= F 用看涨，K < F 用看跌
-5. 输出 CSV（含 strike, maturity, price, type 及 expiry, forward 等辅助列）
+Default symbol: ^SPX (S&P 500 index European-style options, CBOE cash settlement).
 
-画图与 JSON 见 run_extension.py。
+Pipeline:
+1. Use yfinance to fetch spot and option chains per expiry (calls + puts)
+2. Prefer bid/ask mid; when bid/ask are 0 off-hours, use lastPrice (still usable for liquid contracts)
+3. Per expiry, infer forward F from put-call parity (index options: F suffices; no separate dividend model)
+4. Keep OTM only: calls for K >= F, puts for K < F (consistent with typical smile construction)
+5. Write CSV with strike, maturity, price, type, plus expiry, forward, etc.
+
+Plotting and JSON: see run_extension.py.
 """
 import time
 import pathlib
@@ -16,12 +18,17 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+try:
+    from yfinance.exceptions import YFRateLimitError
+except ImportError:
+    YFRateLimitError = None
+
 ROOT = pathlib.Path(__file__).parent
 DATA = ROOT / "data"
 DATA.mkdir(exist_ok=True)
 
-# ---------------- 参数（无风险利率需与 run_extension.py 中 REAL_R 保持一致）----------------
-TICKER = "SPY"
+# ---------------- Params (risk-free R must match REAL_R in run_extension.py) ----------------
+TICKER = "^SPX"
 R = 0.045
 MIN_DAYS = 7
 MAX_EXPIRIES = 6
@@ -30,17 +37,62 @@ MONEYNESS = (0.85, 1.15)
 MAX_REL_SPREAD = 0.5
 MIN_OPEN_INTEREST = 0
 USE_LAST_PRICE = True
-SLEEP_SEC = 0.6
+SLEEP_SEC = 1.2
+RETRY_MAX = 8
+RETRY_BASE_SEC = 15.0
 # --------------------------------------
 
 
+def _is_rate_limit(exc):
+    if YFRateLimitError is not None and isinstance(exc, YFRateLimitError):
+        return True
+    return exc.__class__.__name__ == "YFRateLimitError"
+
+
+def yahoo_retry(label, fn):
+    """On Yahoo 429 rate limit: exponential backoff and retry."""
+    last = None
+    for attempt in range(RETRY_MAX):
+        try:
+            return fn()
+        except Exception as exc:
+            if not _is_rate_limit(exc):
+                raise
+            last = exc
+            wait = RETRY_BASE_SEC * (2 ** attempt)
+            print(f"Yahoo rate limit [{label}], retry in {wait:.0f}s ({attempt + 1}/{RETRY_MAX})...")
+            time.sleep(wait)
+    raise last
+
+
+def fetch_spot(tk):
+    """Index spot: fast_info (one fewer request than history)."""
+    def _load():
+        px = float(tk.fast_info["last_price"])
+        if not np.isfinite(px) or px <= 0:
+            raise RuntimeError("fast_info has no valid last_price")
+        return px
+
+    return yahoo_retry("spot", _load)
+
+
+def list_expiries(tk):
+    """List of available expiry dates."""
+    return yahoo_retry("expiries", lambda: list(tk.options))
+
+
+def fetch_option_chain(tk, expiry):
+    """Option chain for a single expiry."""
+    return yahoo_retry(f"chain {expiry}", lambda: tk.option_chain(expiry))
+
+
 def year_frac(expiry, now):
-    """到期日（按当天 16:00 收盘计）距离现在的年化期限。"""
+    """Year fraction from now to expiry (expiry counted at 16:00 close that day)."""
     return (pd.Timestamp(expiry) + pd.Timedelta(hours=16) - now).total_seconds() / (365.0 * 86400.0)
 
 
 def attach_mid(df, kind):
-    """计算期权价格 mid：优先买卖中间价，否则在 USE_LAST_PRICE 时用 lastPrice。"""
+    """Option mid price: bid/ask mid when available; else lastPrice if USE_LAST_PRICE."""
     need = ["strike", "bid", "ask", "volume", "openInterest"]
     if "lastPrice" not in df.columns:
         df = df.copy()
@@ -62,12 +114,12 @@ def attach_mid(df, kind):
 
 
 def quoted_side(df, kind):
-    """有有效 mid 的合约，用于反推远期价格（不施加未平仓量过滤）。"""
+    """Contracts with valid mid, for inferring forward (no open-interest filter)."""
     return attach_mid(df, kind)
 
 
 def clean_side(df, kind):
-    """用于输出的合约：价差过滤（仅双边报价）+ 未平仓量。"""
+    """Contracts for output: spread filter (two-sided quotes only) + open interest."""
     out = quoted_side(df, kind)
     spread_ok = (~out["has_bidask"]) | ((out["ask"] - out["bid"]) / out["mid"] <= MAX_REL_SPREAD)
     out = out[spread_ok]
@@ -76,14 +128,14 @@ def clean_side(df, kind):
 
 
 def overlap_strikes(calls, puts):
-    """同 strike 同时有看涨、看跌报价的数量。"""
+    """Count strikes with both call and put quotes."""
     if calls.empty or puts.empty:
         return 0
     return len(set(calls.strike) & set(puts.strike))
 
 
 def implied_forward(calls, puts, T, r, spot):
-    """看涨-看跌平价 C - P = e^{-rT}(F - K) 反推远期价格；取最接近现价的若干个行权价的中位数。"""
+    """Put-call parity C - P = e^{-rT}(F - K) for F; median over strikes nearest spot (up to 5)."""
     both = calls[["strike", "mid"]].merge(puts[["strike", "mid"]], on="strike", suffixes=("_c", "_p"))
     if both.empty:
         return None
@@ -94,18 +146,19 @@ def implied_forward(calls, puts, T, r, spot):
 
 
 def forward_fallback(spot, T, r):
-    """同 strike 配对不足时，用 F ≈ S e^{rT} 近似（忽略股息；SPY 有分红时会略偏）。"""
+    """When strike pairing is thin: F approx S e^{rT} (no dividend on spot; ^SPX should prefer parity F)."""
     return float(spot * np.exp(r * T))
 
 
-def pick_expiries(tk, spot, now):
-    """扫描若干到期日，选同 strike 配对最多、且保留虚值后仍有数据的到期日。"""
-    expiries = tk.options
+def pick_expiries(tk, spot, now, expiries):
+    """Scan expiries; pick those with most strike overlap and OTM rows left after clean; cache chains."""
     candidates = [e for e in expiries if year_frac(e, now) * 365.0 >= MIN_DAYS][:SCAN_EXPIRIES]
     scored = []
+    cached = {}
     for e in candidates:
         time.sleep(SLEEP_SEC)
-        chain = tk.option_chain(e)
+        chain = fetch_option_chain(tk, e)
+        cached[e] = chain
         T = year_frac(e, now)
         qc, qp = quoted_side(chain.calls, "C"), quoted_side(chain.puts, "P")
         ov = overlap_strikes(qc, qp)
@@ -126,25 +179,26 @@ def pick_expiries(tk, spot, now):
                 chosen.append(s["expiry"])
             if len(chosen) >= MAX_EXPIRIES:
                 break
-    return chosen, scored
+    return chosen, scored, cached
 
 
 def pull_quotes(ticker):
-    """拉取现价和期权链，返回 (现价, 拉取时间, 清洗后的报价表)。"""
+    """Fetch spot and chains; return (spot, pull time, cleaned quotes DataFrame)."""
     tk = yf.Ticker(ticker)
-    spot = float(tk.history(period="5d")["Close"].iloc[-1])
-    if len(tk.options) == 0:
+    spot = fetch_spot(tk)
+    expiries = list_expiries(tk)
+    if len(expiries) == 0:
         raise RuntimeError(
-            f"Yahoo Finance 没有 {ticker} 的期权链。请使用美股期权标的，例如 SPY、AAPL、QQQ。")
+            f"Yahoo Finance has no option chain for {ticker}. "
+            f"Use ^SPX for index European options; ETFs: SPY, QQQ, etc.")
 
     now = pd.Timestamp.now()
-    use, scan = pick_expiries(tk, spot, now)
-    print(f"{ticker} 现价 {spot:.2f}，扫描 {len(scan)} 个到期日，选用 {use}")
+    use, scan, cached = pick_expiries(tk, spot, now, expiries)
+    print(f"{ticker} spot {spot:.2f}, scanned {len(scan)} expiries, using {use}")
 
     rows = []
     for e in use:
-        time.sleep(SLEEP_SEC)
-        chain = tk.option_chain(e)
+        chain = cached[e]
         T = year_frac(e, now)
         qc, qp = quoted_side(chain.calls, "C"), quoted_side(chain.puts, "P")
         calls, puts = clean_side(chain.calls, "C"), clean_side(chain.puts, "P")
@@ -154,20 +208,20 @@ def pull_quotes(ticker):
         if F is None:
             F = forward_fallback(spot, T, R)
             f_src = "Spot*exp(rT)"
-        print(f"  到期 {e}: 同 strike 配对 {ov}，远期 F={F:.2f} ({f_src})，"
-              f"清洗后 看涨/看跌 {len(calls)}/{len(puts)}")
+        print(f"  expiry {e}: strike pairs {ov}, forward F={F:.2f} ({f_src}), "
+              f"cleaned calls/puts {len(calls)}/{len(puts)}")
         otm = pd.concat([calls[calls.strike >= F], puts[puts.strike < F]])
         otm = otm[(otm.strike / F >= MONEYNESS[0]) & (otm.strike / F <= MONEYNESS[1])]
         otm["maturity"] = T
         otm["expiry"] = e
         otm["forward"] = F
         rows.append(otm)
-        print(f"    保留 {len(otm)} 个虚值合约 (moneyness {MONEYNESS})")
+        print(f"    kept {len(otm)} OTM contracts (moneyness {MONEYNESS})")
 
     if len(rows) == 0 or sum(len(x) for x in rows) == 0:
         raise RuntimeError(
-            f"{ticker} 没有可用报价。当前默认 {TICKER!r}；若仍失败请确认网络/代理，"
-            f"或在美股交易时段（北京时间约 21:30-04:00）再跑。")
+            f"No usable quotes for {ticker}. Default is {TICKER!r}; if it still fails, check network/proxy, "
+            f"wait a few minutes to avoid Yahoo rate limits, or run during US session (~21:30-04:00 Beijing).")
 
     quotes = pd.concat(rows, ignore_index=True).rename(columns={"mid": "price"})
     cols = ["strike", "maturity", "price", "type", "expiry", "forward", "bid", "ask", "volume", "openInterest"]
@@ -179,4 +233,4 @@ if __name__ == "__main__":
     name = TICKER.replace("^", "")
     csv_path = DATA / f"quotes_{name}_REAL.csv"
     quotes.to_csv(csv_path, index=False, encoding="utf-8")
-    print(f"已保存 {len(quotes)} 条报价 -> {csv_path}（拉取时间 {now}，现价 {spot:.2f}）")
+    print(f"Saved {len(quotes)} quotes -> {csv_path} (pulled at {now}, spot {spot:.2f})")

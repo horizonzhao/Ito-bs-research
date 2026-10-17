@@ -24,11 +24,11 @@ pip install -r requirements.txt
 pytest -q                  # 35 tests, ~5 s
 python run_research.py     # Section A  -> figures/fig8–9, results_research.json
 python run_all.py          # Section B  -> figures/fig1–5, results.json
-python datapull.py         # Section C1 data -> data/quotes_SPY_REAL.csv (needs network)
+python datapull.py         # Section C1 data -> data/quotes_SPX_REAL.csv (needs network)
 python run_extension.py    # Section C  -> figures/fig6–7, results_extension.json
 ```
 
-Layout: `src/itobs/` (`bs`, `ito`, `martingale`, `pricing`, `hedging`, `heston`, `implied_vol`, `theory`), `tests/`, `docs/derivations.md`, `data/` (SPY option quotes from `datapull.py`), `run_*.py`, `datapull.py`.
+Layout: `src/itobs/` (`bs`, `ito`, `martingale`, `pricing`, `hedging`, `heston`, `implied_vol`, `theory`), `tests/`, `docs/derivations.md`, `data/` (^SPX option quotes from `datapull.py`), `run_*.py`, `datapull.py`.
 
 ---
 
@@ -206,21 +206,21 @@ For near-delta-neutral positions $`\Theta \approx -\frac{1}{2}\sigma^2 S^2 \Gamm
 
 ## C. Extension: implied volatility and the smile
 
-### C1. Implied volatility: where Black-Scholes breaks (SPY)
+### C1. Implied volatility: where Black-Scholes breaks (^SPX)
 
 **Question.** BS says one number $\sigma$ prices every option. What does the **market** look like when we invert BS strike by strike from real quotes?
 
-**Method.** `datapull.py` loads SPY option chains from Yahoo Finance: mid (or last) prices, put–call parity to infer the forward **F** per expiry (dividends absorbed in **F**), OTM calls for **K ≥ F** and OTM puts for **K < F**, then writes `data/quotes_SPY_REAL.csv`. `run_extension.py` inverts Black-Scholes per strike with `implied_vol.smile_from_quotes`, using $S_{\mathrm{eff}} = F e^{-rT}$ each expiry (equivalent to spot plus continuous yield in BS). Summary numbers are in `results_extension.json` under `real_smile`. Update **r** in both `datapull.py` and `run_extension.py` (`REAL_R`) when refreshing data.
+**Method.** `datapull.py` loads **^SPX** (S&P 500 index, European-style) option chains from Yahoo Finance: mid (or last) prices, put–call parity to infer the forward **F** per expiry, OTM calls for **K ≥ F** and OTM puts for **K < F**, then writes `data/quotes_SPX_REAL.csv`. `run_extension.py` inverts Black-Scholes per strike with `implied_vol.smile_from_quotes`, using $S_{\mathrm{eff}} = F e^{-rT}$ each expiry (equivalent to spot plus continuous yield in BS). Summary numbers are in `results_extension.json` under `real_smile`. Update **r** in both `datapull.py` and `run_extension.py` (`REAL_R`) when refreshing data.
 
 ![Smile](figures/fig6_smile.png)
 
 **Interpretation** (example from the bundled quote file; re-run `datapull.py` to refresh).
 
-**(a)** Implied vol is **not flat**: e.g. for expiry 2026-12-18, IV is about **25.6%** at **K=665** vs **12.7%** at **K=890**, with ATM near **13.8%** — the usual equity-index **downward skew** (puts richer than calls at the same distance from the forward).
+**(a)** Implied vol is **not flat**: e.g. for expiry **2026-10-30**, IV is about **44.4%** at **K=6525** vs **23.3%** at **K=8800**, with ATM near **14.8%** — the usual equity-index **downward skew** (OTM puts carry higher implied vol than OTM calls at comparable distance from **F**).
 
-**(b)** Panel (b) plots IV vs **ln(K/F)** so skew is comparable across expiries without guessing a dividend yield on spot.
+**(b)** Panel (b) plots IV vs **ln(K/F)** so skew is comparable across expiries without a separate dividend adjustment on spot (forwards come from parity in the data).
 
-**(c)** Short-dated slices are often **steeper** than longer ones in the sample file; see multiple expiries in the figure and `real_smile.skew_sample` in JSON.
+**(c)** In the bundled file, **near-term** expiries (e.g. 2026-10-26–30) show **higher wing IVs** and often a **steeper** smile than **2026-11-06** and **2026-11-13**; see the figure and `real_smile.skew_sample` / `atm_iv` in JSON (six expiries, 1126 OTM quotes, $r=4.5%$, effective spot ≈ **7657**).
 
 Which BS assumption fails in practice? **Constant $\sigma$.** Implied vol is best read as a **quoting convention**, not a single forecast of future volatility.
 
@@ -279,7 +279,7 @@ Randomised tests use fixed seeds and tolerances of several standard errors.
 
 ## Limitations and next steps
 
-- **SPY quotes are a snapshot, not calibrated.** `datapull.py` uses Yahoo mids/lasts and a flat **r**; fig6 is descriptive. Calibrating Heston (or another model) to `quotes_SPY_REAL.csv` is a natural next step.
+- **^SPX quotes are a snapshot, not calibrated.** `datapull.py` uses Yahoo mids/lasts and a flat **r**; fig6 is descriptive. Calibrating Heston (or another model) to `quotes_SPX_REAL.csv` is a natural next step.
 - **The Heston error floor is not decomposed.** A test of "residual ≈ Vega × volatility shocks" would turn finding 2 from an observation into an explanation. Adding a second option to hedge Vega would show how much of the floor disappears.
 - **A1's prediction is first-order in $\Delta t$.** It is least accurate at very small N (about 7% at N=8).
 - **Heston paths use full-truncation Euler.** In the earlier pricer check, Monte Carlo sat about 0.4% below the semi-analytic price (8.897 vs 8.929), slightly outside its sampling interval; we attribute this to discretisation but did not isolate it. We did not implement the QE scheme.
