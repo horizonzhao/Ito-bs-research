@@ -34,7 +34,7 @@ When paths are **Heston** but the trader still computes $`\Delta(S,t,\sigma_h)`$
 
 ### Predictability of mean versus tails
 
-If the option is sold at a Black–Scholes price with input $`\sigma_h`$, theory gives $`\mathbb{E}[\operatorname{PnL}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}`$ across nine cases ($`\sigma_h \in \{15\%,\,20\%,\,25\%\}`$, $\rho \in \{-0.7,\,0,\,0.7\}$); all simulation means match within $|z| \le 1.2$. **Mispricing relative to Heston fair value sets the mean**; the delta hedge does not manufacture alpha. Changing $`\sigma_h`$ moves the **mean** when the premium is BS-based, but **does not remove** the ~2 std floor or the heavy left tail (std **2.2–3.2**, 1% quantiles **−3.7 to −12.9**). Premium sets the centre of the distribution; **spread and tail behaviour** are largely unchanged in order of magnitude across $`\sigma_h`$. Optional extension **C2** (fig7, Heston fair premium so mean ≈ 0) reinforces the same separation: P&L std **~2.3** versus **~0.4** in a BS-world reference at 252 rebalances; swapping ATM versus own-strike implied vol at $K=120$ trades **std versus skew** without eliminating the floor (`results_extension.json`).
+If the option is sold at a Black–Scholes price with input $`\sigma_h`$, theory gives $`\mathbb{E}[\mathrm{PnL}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}`$ across nine cases ($`\sigma_h \in \{15\%,\,20\%,\,25\%\}`$, $\rho \in \{-0.7,\,0,\,0.7\}$); all simulation means match within $|z| \le 1.2$. **Mispricing relative to Heston fair value sets the mean**; the delta hedge does not manufacture alpha. Changing $`\sigma_h`$ moves the **mean** when the premium is BS-based, but **does not remove** the ~2 std floor or the heavy left tail (std **2.2–3.2**, 1% quantiles **−3.7 to −12.9**). Premium sets the centre of the distribution; **spread and tail behaviour** are largely unchanged in order of magnitude across $`\sigma_h`$. Optional extension **C2** (fig7, Heston fair premium so mean ≈ 0) reinforces the same separation: P&L std **~2.3** versus **~0.4** in a BS-world reference at 252 rebalances; swapping ATM versus own-strike implied vol at $K=120$ trades **std versus skew** without eliminating the floor (`results_extension.json`).
 
 ### Market link
 
@@ -128,7 +128,7 @@ Analytic Greeks satisfy the Black–Scholes PDE. Near delta-neutrality, $\Theta 
 Between rebalances, delta hedging cancels the first-order $dS$ term in the option’s Itô expansion; what remains is the **gamma /** $(dS)^2$ channel. Theory gives
 
 ```math
-\operatorname{Var}(\operatorname{PnL}) \approx \frac{\sigma^4 \Delta t}{2}\int_0^T e^{-2rt}\,\mathbb{E}[\Gamma_t^2 S_t^4]\,dt
+\mathrm{Var}(\mathrm{PnL}) \approx \frac{\sigma^4 \Delta t}{2}\int_0^T e^{-2rt}\,\mathbb{E}[\Gamma_t^2 S_t^4]\,dt
 ```
 
 so standard deviation scales as $N^{-1/2}$ for equal time steps. Simulation versus prediction:
@@ -136,7 +136,7 @@ so standard deviation scales as $N^{-1/2}$ for equal time steps. Simulation vers
 | $N$ | 8 | 32 | 128 | 512 | 1024 |
 |-----|---|---|---|---|---|
 | Sim / pred std | 2.27 / 2.43 | 1.18 / 1.21 | 0.59 / 0.61 | 0.30 / 0.30 | 0.21 / 0.21 |
-| $\operatorname{Corr}(\operatorname{PnL}, \sum \Gamma)$ | 0.957 | 0.976 | 0.988 | 0.994 | 0.996 |
+| $\mathrm{Corr}(\mathrm{PnL}, \sum \Gamma)$ | 0.957 | 0.976 | 0.988 | 0.994 | 0.996 |
 
 ![Error sources](figures/fig8_error_sources.png)
 
@@ -158,7 +158,7 @@ Increasing $N$ **compresses** error in the BS world but **does not remove** the 
 When the sale price is $`V_{\mathrm{BS}}(\sigma_h)`$ and fair value is $`C_{\mathrm{Heston}}`$,
 
 ```math
-\mathbb{E}[\operatorname{PnL}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}.
+\mathbb{E}[\mathrm{PnL}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}.
 ```
 
 ![Mean prediction](figures/fig9_misspecification_mean.png)
