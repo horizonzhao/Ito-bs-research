@@ -1,4 +1,7 @@
-"""Run every experiment, save figures to figures/ and numbers to results.json."""
+"""Section B: numerical foundations (Ito, martingales, pricing, Greeks).
+
+Run before run_research.py when reproducing the full story; outputs fig1-5 and results.json.
+"""
 import json, sys, pathlib
 import numpy as np
 import matplotlib

@@ -1,4 +1,9 @@
-"""Extension: ^SPX implied-vol smile (fig6) and Heston hedging supplement (fig7)."""
+"""Extension (Section C): market smile + optional hedge-vol supplement.
+
+Primary (C1): ^SPX quotes -> invert IV -> fig6 (link to constant-sigma failure in A2).
+Optional (C2): Heston-world BS-delta hedge at chosen sigma_h -> fig7 (reinforces A2/A3).
+Run after datapull.py has written data/quotes_SPX_REAL.csv.
+"""
 import json, sys, pathlib
 from datetime import datetime, timezone
 
