@@ -1,85 +1,75 @@
 # Where Does Delta-Hedging Error Come From?
+
 ### Itô calculus, martingales and Black–Scholes, tested against stochastic volatility
 
-## Project summary
+---
 
-Decompose **delta-hedging residual P&L** into **(i) discrete rebalancing** (Itô second-order / gamma) vs **(ii) model misspecification** (Heston truth, Black–Scholes delta in stock only). Theory in [`docs/derivations.md`](docs/derivations.md); validation by simulation and **35 pytest checks**. Market link: **^SPX implied-vol smile** (constant $\sigma$ fails). Code: Python, `src/itobs/`.
+## Abstract
 
-**Headline results:** BS-world hedge-error std is **predictable** (~3–7% vs simulation) and scales as $N^{-1/2}$; Heston-world std **floors near ~2.2** despite more rebalances; under misspricing the **mean P&L** matches **premium − fair value** but **tails stay large**.
+This repository studies the **residual profit-and-loss (P&L)** left after a trader sells an option and hedges it with the Black–Scholes delta in the underlying stock alone. Two mechanisms compete for the same residual: **(i) discrete rebalancing**, which exposes the second-order Itô (gamma) term that continuous-time theory absorbs; and **(ii) model misspecification**, when the true dynamics are richer than geometric Brownian motion—for example Heston stochastic volatility—while the hedge still uses a constant-volatility delta. The theoretical decomposition is written out in [`docs/derivations.md`](docs/derivations.md); empirical claims are checked by Monte Carlo simulation and **35 pytest** regression tests. A market-facing extension documents why a **single** Black–Scholes volatility cannot reconcile **^SPX** implied-volatility smiles. Implementation is in Python under `src/itobs/`.
+
+The central quantitative findings are as follows. In a Black–Scholes world, the standard deviation of hedge error is **predictable** in advance (simulation tracks theory within roughly **3–7%**) and scales with the number of rebalances $N$ as **$N^{-1/2}$**, consistent with a summed gamma–variance story. When paths are generated from **Heston** but the hedge remains **stock-only BS delta**, the P&L standard deviation **does not** vanish with $N$: it **floors near ~2.2** even as $N$ grows from 16 to 1000, while the BS-world std at comparable settings can fall to **~0.22**. Under intentional mispricing (sell at a BS premium, fair value from Heston), the **mean** P&L is predictable as **premium minus fair value**, but **tail risk stays large**—a distinction that matters for risk management as much as for expected edge.
 
 ---
 
-## How the repo fits together
+## Research question and scope
 
-Read or run in this order — each step feeds the next:
+A standard delta-hedging program removes first-order exposure to small moves in $S$ between rebalancing dates. Whatever remains in the hedging account is the object of this study. The guiding question is:
 
-| Step | Script | Question answered |
-|------|--------|-------------------|
-| **B. Foundations** | `run_all.py` | Are Itô, martingales, and BS pricing implemented correctly? (Trust the simulator.) |
-| **A. Research** | `run_research.py` | **Main question:** discretisation vs wrong model; what can be predicted? |
-| **C. Extension** | `datapull.py` + `run_extension.py` | Why does a **single** BS vol fail in real quotes? Optional sim: hedge-vol choice (fig7). |
+> **How much of the residual P&L comes from (i) hedging only at discrete times, and how much from (ii) using the wrong model? Can each component be forecast before trading?**
 
-```
-  B (math sanity)  ──►  A (hedge P&L decomposition)  ──►  C (market smile + optional supplement)
-```
-
-**Figures for a quick review:** fig8–9 (core), fig6 (market), fig1–3 (foundations). fig7 = optional reinforcement of A2/A3.
-
----
-
-## Research question
-
-> A trader sells an option and hedges it with the Black–Scholes delta. The hedge leaves a residual profit-and-loss (P&L).
-> **How much of that residual comes from (i) hedging only at discrete times, and how much from (ii) the model being wrong? Can each part be predicted in advance?**
+**Scope.** “Truth” is fixed **by the simulation design**, not by which model best forecasts live **^SPX** returns. Experiments compare paths drawn under Black–Scholes versus Heston; the hedge is always the **Black–Scholes delta in stock only** (no variance swap, no vega hedge). Section **C1** uses a bundled **^SPX** option chain only to show that **constant** $\sigma$ is inconsistent with cross-sectional quotes; **Heston is not calibrated** to those prices. Baseline parameters are $S_0=K=100$, $T=1$, $r=3\%$; Black–Scholes $\sigma=20\%$; Heston $v_0=\theta=0.04$, $\kappa=2$, $\xi=0.5$, $\rho=-0.7$. Numeric outputs are archived in `results_research.json` and `results_extension.json`.
 
 ---
 
 ## Conclusions
 
-### Direct answers
+### Discrete rebalancing in a correctly specified model
 
-**(i) Discrete rebalancing.** When paths **are** Black–Scholes, residual P&L is mostly the **second-order Itô / gamma** term from finite rebalancing. Its std is **predictable** (`theory.predicted_hedge_std`), scales $\propto 1/\sqrt{N}$, and tracks the summed $\Gamma$-terms (corr **0.96–0.99**).
+When simulated paths **are** Black–Scholes, residual P&L is dominated by the **second-order Itô / gamma** contribution from rebalancing finitely often. Per-step error takes the form $e_k = -\frac{1}{2}\Gamma_k S_k^2 \sigma^2 \Delta t\,(Z_k^2-1)$; aggregating variance yields the integral formula in derivations §10, hence **std $\propto 1/\sqrt{N}$**. The module `theory.predicted_hedge_std` implements that prediction. Simulated std at $N=8$ is **2.27** versus predicted **2.43**; for $N \ge 32$ the gap is **≤~3%**. The correlation between total P&L and the sum of gamma terms ranges **0.96–0.99** across $N$, and the log–log slope of std versus $N$ is **−0.491** (theory **−0.5**). Mean P&L stays near zero: discretisation risk is **material but forecastable**, not a hidden drift.
 
-**(ii) Wrong model.** When paths are **Heston** but you hedge with **BS delta in stock only**, std **flattens near ~2.2** ($N=16 \to 1000$: 2.85→2.23) while BS-world std at the same settings can fall to **~0.22** — **incompleteness / misspecification**, not “too few rebalances.” Left skew and fat tails remain (1% quantile **−7.2** vs **−0.56** in BS world at $N=1000$).
+### Misspecification when volatility is stochastic
 
-**Predictability.** Yes for **BS discretisation std** and for **mean P&L** when you sell at a BS price: $`\mathbb{E}[\text{P\&L}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}`$ (9 cases, all $|z| \leq 1.2$). No closed-form floor formula here — measured by simulation.
+When paths are **Heston** but the trader still computes **$\Delta(S,t,\sigma_h)$** from Black–Scholes and trades **stock only**, residual risk reflects **market incompleteness** under the chosen hedge—not merely “too few” rebalance steps. At fixed $\sigma_h=20\%$ and sale at $V_{\mathrm{BS}}$, simulated std falls from **2.85** to **2.23** as $N$ goes from 16 to 1000 on Heston paths, whereas on BS paths at the same settings it falls to **~0.22**. The ratio **2.23 / 0.22** at $N=1000$ isolates the **floor** from the **$N^{-1/2}$** discretisation decay. Left skew and fat tails persist: the 1% quantile is **−7.2** (Heston) versus **−0.56** (BS) at $N=1000$. No closed-form expression for the floor is claimed here; the level **~2.2** is **measured** by simulation.
 
-**Scope.** Truth is **fixed by experiment** (BS paths vs Heston paths), not “who forecasts SPX best.” Section **C1** only shows **non-flat** IV on ^SPX; Heston is **not** calibrated to those quotes.
+### Predictability of mean versus tails
 
-**Parameters:** `S0=K=100, T=1, r=3%`; BS $\sigma=20\%$; Heston `v0=θ=0.04, κ=2, ξ=0.5, ρ=−0.7`. Numbers: `results_research.json`, `results_extension.json`.
+If the option is sold at a Black–Scholes price with input $\sigma_h$, theory gives $\mathbb{E}[\text{P\&L}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}$ across nine cases ($\sigma_h \in \{15\%,20\%,25\%\}$, $\rho \in \{-0.7,0,0.7\}$); all simulation means match within **$|z| \le 1.2$**. **Mispricing relative to Heston fair value sets the mean**; the delta hedge does not manufacture alpha. Changing $\sigma_h$ moves the **mean** when the premium is BS-based, but **does not remove** the ~2 std floor or the heavy left tail (std **2.2–3.2**, 1% quantiles **−3.7 to −12.9**). Premium sets the centre of the distribution; **spread and tail behaviour** are largely unchanged in order of magnitude across $\sigma_h$. Optional extension **C2** (fig7, Heston fair premium so mean ≈ 0) reinforces the same separation: P&L std **~2.3** versus **~0.4** in a BS-world reference at 252 rebalances; swapping ATM versus own-strike implied vol at $K=120$ trades **std versus skew** without eliminating the floor (`results_extension.json`).
 
-### Summary table
+### Market link
 
-| # | Where | Takeaway |
-|---|--------|----------|
-| 1 | A1, fig8 | $\Gamma$-term story; pred vs sim **~3–7%**; slope **−0.491** (theory **−0.5**). |
-| 2 | A2, fig8 | Heston std **→ ~2.2**; BS-world std **→ ~0.22** at $N=1000$. |
-| 3 | A3, fig9 | Mean = **premium − Heston fair**; predictable. |
-| 4 | A3 | **Mean ≠ safety:** std **2.2–3.2**; 1% q **−3.7 to −12.9**. |
-| 5 | C1, fig6 | Real IV **smiles / skews**; constant $\sigma$ fails. |
-| 6 | A3, C2† | Hedge vol $`\sigma_h`$ moves **mean** (BS-priced) or **shape** (Heston-priced); **does not remove** the ~2 std floor. |
+Bundled **^SPX** data show **downward skew** in implied volatility (e.g. wing IV **~44%** versus **~23%** on a 2026-10-30 sample). In practice, traders quote options in an **IV surface**; section **A2** shows that even after picking a hedge vol $\sigma_h$, **Heston dynamics** with **stock-only** delta leave a **non-vanishing** hedge P&L scale. IV is used as a **quote coordinate**, not as a single forecast $\sigma$ for the entire economy.
 
-†C2 is an **optional** simulation (fig7); same message as rows 2–4 with fair Heston premium.
+### Empirical summary
 
-### Detail (sections A–C)
+| Theme | Location | Result |
+|--------|----------|--------|
+| Discretisation | A1, fig8 | $\Gamma$-term narrative; pred vs sim **~3–7%**; slope **−0.491** (theory **−0.5**) |
+| Misspec floor | A2, fig8 | Heston std **→ ~2.2**; BS-world std **→ ~0.22** at $N=1000$ |
+| Mean under misspec | A3, fig9 | Mean = **premium − Heston fair**; predictable in all 9 cases |
+| Tails | A3 | **Mean ≠ safety:** std **2.2–3.2**; 1% q **−3.7 to −12.9** |
+| Market smile | C1, fig6 | Real IV **smiles / skews**; constant $\sigma$ fails |
+| Hedge vol | A3, C2† | $\sigma_h$ shifts mean (BS-priced) or shape (Heston-priced); **floor ~2 std remains** |
 
-**1 — Discretisation (A1).** Per-step error $`e_k = -\frac{1}{2}\Gamma_k S_k^2 \sigma^2 \Delta t\,(Z_k^2-1)`$; variance integral in derivations §10. Sim std **2.27** vs pred **2.43** at $N=8$; **≤~3%** gap for $N \ge 32$.
-
-**2 — Error floor (A2).** Same BS delta at $`\sigma_h=20\%`$; sell at $`V_{\mathrm{BS}}`$ vs Heston paths. Std ratio Heston/BS at $N=1000$: **2.23 / 0.22**.
-
-**3 — Mean under misspec (A3).** $`\sigma_h \in \{15\%,20\%,25\%\}`$, $\rho \in \{-0.7,0,0.7\}$: hedge does not create edge; **mispricing vs Heston fair** sets the mean.
-
-**4 — Tails (A3).** Premium sets the centre; **spread and left tail** unchanged in order by $`\sigma_h`$.
-
-**5 — Hedge vol (A3 + optional C2).** Always **BS delta**; $`\sigma_h`$ is the input to $`\Delta(S,t,\sigma_h)`$. Changing $`\sigma_h`$ does not eliminate the floor; at $K=120$, own-strike IV vs ATM trades **std vs skew** (fig7, `results_extension.json`).
-
-**6 — Market (C1).** Bundled ^SPX: downward skew (e.g. wing IV **~44%** vs **~23%** on 2026-10-30 sample). IV as **quote coordinate**, not one forecast $\sigma$.
-
-**7 — Foundations (B).** fig1–3, 5 verify Itô, martingales, $\mathbb{Q}$ pricing, PDE; support A/C simulators (e.g. $\mathbb{P}$ MC **~55%** too high vs replication price).
+†C2 is optional (fig7); same message as A2–A3 with Heston fair premium.
 
 ---
 
-## Reproduce
+## Repository workflow
+
+The project is organised in three layers that should be read or executed **in order**; each layer supplies trust for the next. **B (Foundations)** runs `run_all.py` and asks whether Itô calculus, martingales, and Black–Scholes pricing are implemented consistently—this is the **sanity check on the simulator**. **A (Research)** runs `run_research.py` and addresses the **main decomposition** of hedge P&L. **C (Extension)** uses `datapull.py` and `run_extension.py` for the **^SPX** smile and an optional hedge-vol supplement (fig7). For a quick visual pass: **fig8–9** (core research), **fig6** (market), **fig1–3** (foundations); **fig7** optionally reinforces A2/A3.
+
+```
+  B (math sanity)  ──►  A (hedge P&L decomposition)  ──►  C (market smile + optional supplement)
+```
+
+| Step | Script | Role |
+|------|--------|------|
+| **B. Foundations** | `run_all.py` | Verify Itô, martingales, BS pricing (trust the simulator) |
+| **A. Research** | `run_research.py` | Discretisation vs wrong model; predictability |
+| **C. Extension** | `datapull.py`, `run_extension.py` | ^SPX smile; optional hedge-vol study (fig7) |
+
+**Reproduce:**
 
 ```bash
 pip install -r requirements.txt
@@ -95,115 +85,119 @@ python run_extension.py        # C -> fig6; optional fig7 + results_extension.js
 
 ---
 
-## B. Foundations — trust the simulator
+## B. Foundations — trusting the simulator
 
-Derivations: [`docs/derivations.md`](docs/derivations.md). These experiments are **prerequisites for A**, not separate trading claims.
+Full derivations appear in [`docs/derivations.md`](docs/derivations.md). The experiments below are **prerequisites for A**, not standalone trading claims.
 
 ### B1. Itô lemma
 
+Under $dS = \mu S\,dt + \sigma S\,dW$, Itô’s lemma gives
+
 ```math
-d\ln S = (\mu - \tfrac{1}{2}\sigma^2)\,dt + \sigma\,dW
+d\ln S = (\mu - \tfrac{1}{2}\sigma^2)\,dt + \sigma\,dW.
 ```
 
 ![Itô lemma](figures/fig1_ito_lemma.png)
 
-Log-return drifts at $\mu-\sigma^2/2$; $`\mathbb{E}[S_T]`$ still $`S_0 e^{\mu T}`$. Itô (left) integration keeps trading integrals fair vs right-endpoint bias.
+Log-return drift is $\mu-\sigma^2/2$, while $\mathbb{E}[S_T]=S_0 e^{\mu T}$. **Left-endpoint** (Itô) integration aligns simulated trading integrals with the theory; right-endpoint rules introduce a systematic bias in $\int W\,dW$ and related objects.
 
 ### B2. Martingales
 
 ![Martingale](figures/fig2_martingale.png)
 
-$`W_t^2-t`$ is a martingale; discounted $S$ is a martingale **only** under $\mathbb{Q}$.
+Brownian motion has independent increments of mean zero; $W_t^2-t$ is a martingale. Discounted stock is a martingale **under the pricing measure $\mathbb{Q}$**, not under every physical $\mathbb{P}$—a distinction reused when separating replication prices from naive physical Monte Carlo.
 
 ### B3. Black–Scholes pricing
 
 ![Pricing](figures/fig3_pricing.png)
 
-Closed form, $\mathbb{Q}$ MC, PDE, binomial agree; $`\mathbb{P}`$ MC is **wrong** for the replication price.
+Closed-form values agree with $\mathbb{Q}$ Monte Carlo, PDE finite-difference, and binomial trees; **$\mathbb{P}$-measure Monte Carlo is systematically wrong** for the replication price (e.g. ~55% too high in the bundled check), illustrating that hedging and pricing are tied to $\mathbb{Q}$.
 
 ### B4. Greeks and PDE
 
 ![Greeks](figures/fig5_greeks.png)
 
-Closed-form Greeks satisfy the BS PDE; near delta-neutral, $\Theta \approx -\frac{1}{2}\sigma^2 S^2 \Gamma$.
+Analytic Greeks satisfy the Black–Scholes PDE. Near delta-neutrality, $\Theta \approx -\frac{1}{2}\sigma^2 S^2 \Gamma$, linking time decay to the same second-order spatial sensitivity that drives discrete hedge error in section A.
 
 ---
 
 ## A. Research — hedge error decomposition
 
-### A1. Discretisation in a BS world (fig8)
+### A1. Discretisation in a Black–Scholes world (fig8)
 
-Between rebalances, delta removes first-order risk; remainder is the $\Gamma$ / Itô term above.  
-$`\mathrm{Var}(\text{P\&L}) \approx \frac{\sigma^4 \Delta t}{2}\int_0^T e^{-2rt}\,\mathbb{E}[\Gamma_t^2 S_t^4]\,dt`$ → std $\propto 1/\sqrt{N}$.
+Between rebalances, delta hedging cancels the first-order $dS$ term in the option’s Itô expansion; what remains is the **gamma / $(dS)^2$** channel. Theory gives
 
-| N | 8 | 32 | 128 | 512 | 1024 |
-|---|---|---|---|---|---|
+```math
+\mathrm{Var}(\text{P\&L}) \approx \frac{\sigma^4 \Delta t}{2}\int_0^T e^{-2rt}\,\mathbb{E}[\Gamma_t^2 S_t^4]\,dt,
+```
+
+so standard deviation scales as **$N^{-1/2}$** for equal time steps. Simulation versus prediction:
+
+| $N$ | 8 | 32 | 128 | 512 | 1024 |
+|-----|---|---|---|---|---|
 | Sim / pred std | 2.27 / 2.43 | 1.18 / 1.21 | 0.59 / 0.61 | 0.30 / 0.30 | 0.21 / 0.21 |
-| Corr(P&L, Σ Γ-terms) | 0.957 | 0.976 | 0.988 | 0.994 | 0.996 |
+| Corr(P&L, $\sum \Gamma$-terms) | 0.957 | 0.976 | 0.988 | 0.994 | 0.996 |
 
 ![Error sources](figures/fig8_error_sources.png)
 
-Mean P&L ≈ 0 for all $N$; discretisation risk is **sizable and predictable**.
+Mean P&L is negligible at all $N$: the object to manage is **volatility of error**, and that volatility is **forecastable**.
 
-### A2. Misspecification floor (fig8 panel b)
+### A2. Misspecification floor (fig8, panel b)
 
-Heston paths, BS delta at $`\sigma_h=20\%`$, sold at $`V_{\mathrm{BS}}`$:
+Paths are **Heston**; the trader sells at $V_{\mathrm{BS}}$ and hedges with BS delta at $\sigma_h=20\%$:
 
-| | N=16 | N=1000 |
-|---|---|---|
+| | $N=16$ | $N=1000$ |
+|---|--------|----------|
 | Std (Heston / BS paths) | 2.85 / 1.65 | **2.23 / 0.22** |
-| 1% q (Heston / BS) | −9.53 / −4.61 | −7.16 / −0.56 |
+| 1% quantile (Heston / BS) | −9.53 / −4.61 | −7.16 / −0.56 |
 
-More rebalances **do not** remove the Heston floor — stochastic vol with **stock-only** delta.
+Increasing $N$ **compresses** error in the BS world but **does not remove** the Heston-world scale—a signature of **stochastic volatility hedged with stock only**.
 
-### A3. Mean and tails (fig9)
+### A3. Mean and tails under mispricing (fig9)
+
+When the sale price is $V_{\mathrm{BS}}(\sigma_h)$ and fair value is $C_{\mathrm{Heston}}$,
 
 ```math
-\mathbb{E}[\text{P\&L}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}
+\mathbb{E}[\text{P\&L}] = V_{\mathrm{BS}}(\sigma_h) - C_{\mathrm{Heston}}.
 ```
 
 ![Mean prediction](figures/fig9_misspecification_mean.png)
 
-Theory matches simulation in all 9 cases; std **2.2–3.2** and heavy left tails regardless of $`\sigma_h`$.
+Simulation means match this identity in all nine parameter cells; **standard deviation and left-tail quantiles** remain large regardless of $\sigma_h$, so **expected P&L is not a sufficient risk statistic**.
 
 ---
 
-## C. Extension — market and optional supplement
+## C. Extension — market data and optional supplement
 
-### C1. ^SPX implied volatility (main market link)
+### C1. ^SPX implied volatility
 
-`datapull.py` fetches chains (bid/ask stored; smile uses **mid**). `run_extension.py` inverts BS per strike with $`S_{\mathrm{eff}}=Fe^{-rT}`$. Align **r** in `datapull.py` and `REAL_R` in `run_extension.py` when refreshing.
+`datapull.py` downloads option chains (bid and ask stored; the smile plot uses **mid**). `run_extension.py` inverts Black–Scholes per strike with $S_{\mathrm{eff}}=Fe^{-rT}$. When refreshing data, align the rate in `datapull.py` with `REAL_R` in `run_extension.py`.
 
 ![Smile](figures/fig6_smile.png)
 
-**Link to A:** practice uses a **surface** of IVs; A2 shows that even with a chosen $`\sigma_h`$, **Heston dynamics** leave a hedge P&L floor when you only trade stock.
+The figure is **descriptive**: it motivates why practitioners work with a **surface** of implied volatilities. Section **A2** then shows that, even after fixing a hedge input $\sigma_h$, **Heston truth** with **stock-only** delta leaves a **persistent** residual P&L scale that more frequent rebalancing cannot erase.
 
 ### C2. Hedge-vol supplement (optional, fig7)
 
-Same message as A3/A2 with **Heston fair premium** (mean ≈ 0): P&L std **~2.3** vs **~0.4** in BS-world reference at 252 rebalances; swapping ATM vs own-strike IV at $K=120$ trades std vs skew — details in `results_extension.json`.
+This block repeats the A3/A2 logic with **Heston fair premium** (mean ≈ 0) and compares hedge-vol choices (ATM versus own-strike IV at $K=120$). It is **not required** to answer the main research question; it is retained for completeness and for fig7 in application packets.
 
 ![Heston hedging](figures/fig7_heston_hedging.png)
 
-Not required to reproduce the main research question; kept for completeness and fig7 in applications packet.
-
 ---
 
-## Tests
+## Validation and limitations
 
-`pytest -q` — BS parity/PDE/Greeks; Itô and martingales; $\mathbb{Q}$ vs $\mathbb{P}$ pricing; Heston↔BS and IV; hedge std slope, prediction match, $\Gamma$ correlation, misspec mean. Fixed seeds.
+**Tests.** `pytest -q` covers Black–Scholes put–call parity, PDE, and Greeks; Itô and martingale identities; $\mathbb{Q}$ versus $\mathbb{P}$ pricing; Heston–BS consistency and implied vol; hedge-error std slope, prediction match, gamma correlation, and misspecification mean. Seeds are fixed for reproducibility.
 
-## Limitations
+**Limitations.** The **^SPX** slice is a single Yahoo snapshot with flat **r**; smiles are not fit to Heston. The Heston **floor** is not decomposed into vega or other channels, and no second hedging instrument is used. A1 theory is first-order in $\Delta t$; Heston paths use full-truncation Euler. Transaction costs, jumps, and local volatility are out of scope. `fig4_hedging.png` documents a small $O(\Delta t)$ mean bias under extreme drift.
 
-- ^SPX snapshot (Yahoo, flat **r**); descriptive smile only — no Heston calibration.
-- Heston floor not decomposed (Vega shocks); no second instrument.
-- A1 first-order in $\Delta t$; Heston paths: full-truncation Euler.
-- Not covered: transaction costs, jumps, local vol. `fig4_hedging.png`: small $O(\Delta t)$ mean bias at extreme drift.
+---
 
 ## References
 
 - Shreve, *Stochastic Calculus for Finance II*
 - Hull, *Options, Futures, and Other Derivatives*
-- Black & Scholes (1973), Merton (1973)
+- Black & Scholes (1973); Merton (1973)
 - Heston (1993)
 - Lewis (2001); Gatheral, *The Volatility Surface*
 
